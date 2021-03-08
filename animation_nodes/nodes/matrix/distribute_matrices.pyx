@@ -1,7 +1,7 @@
 import bpy
 from bpy.props import *
 from math import pi as _pi
-from libc.math cimport sin, cos
+from libc.math cimport sin, cos, sqrt, fmod
 from ... utils.limits cimport INT_MAX
 from ... events import propertyChanged
 from ... base_types import AnimationNode
@@ -18,6 +18,7 @@ modeItems = [
     ("MESH", "Mesh", "", "NONE", 3),
     ("SPIRAL", "Spiral", "", "NONE", 4),
     ("SPLINE", "Spline", "", "NONE", 5),
+    ("FIBONACCI", "Fibonacci", "", "NONE", 6),
 ]
 
 distanceModeItems = [
@@ -28,6 +29,11 @@ distanceModeItems = [
 meshModeItems = [
     ("VERTICES", "Vertices", "","NONE", 0),
     ("POLYGONS", "Polygons", "", "NONE", 1)
+]
+
+fibonacciModeItems = [
+    ("DISK", "Disk", "","NONE", 0),
+    ("SPHERE", "Sphere", "", "NONE", 1)
 ]
 
 splineDistributionMethodItems = (
@@ -44,10 +50,10 @@ searchItems = {
     "Distribute Mesh" : "MESH",
     "Distribute Spiral" : "SPIRAL",
     "Distribute Spline" : "SPLINE",
+    "Distribute Fibonacci" : "FIBONACCI",
 }
 
 directionAxisItems = [(axis, axis, "") for axis in ("X", "Y", "Z")]
-
 planeAxisItems = [(axis, axis, "") for axis in ("XY", "YZ", "ZX")]
 
 class DistributeMatricesNode(bpy.types.Node, AnimationNode):
@@ -94,6 +100,9 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
         description = "Increase to have a more accurate evaluation if the type is set to Uniform",
         update = propertyChanged)
 
+    __annotations__["fibonacciMode"] = EnumProperty(name = "Fibonacci Mode", default = "DISK",
+        items = fibonacciModeItems, update = AnimationNode.refresh)
+
     def create(self):
         if self.mode == "LINEAR":
             self.newInput("Integer", "Amount", "amount", value = 5)
@@ -139,7 +148,10 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
             if self.splineDistributionMethod != "VERTICES":
                 self.newInput("Float", "Start", "start", value = 0.0).setRange(0.0, 1.0)
                 self.newInput("Float", "End", "end", value = 1.0).setRange(0.0, 1.0)
-
+        elif self.mode == "FIBONACCI":
+            self.newInput("Integer", "Amount", "amount", value = 100, minValue = 0)
+            self.newInput("Float", "Radius", "radius", value = 10, minValue = 0)
+            
         self.newOutput("Matrix List", "Matrices", "matrices")
         self.newOutput("Vector List", "Vectors", "vectors")
 
@@ -164,6 +176,9 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
             layout.prop(self, "centerSpiral", toggle = True)
         if self.mode == "SPLINE":
             col.prop(self, "splineDistributionMethod", text = "")
+        if self.mode == "FIBONACCI":
+            col.prop(self, "fibonacciMode", text = "")
+            layout.prop(self, "planeAxis", expand = True)
 
     def drawAdvanced(self, layout):
         if self.mode == "CIRCLE":
@@ -200,7 +215,12 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
                 yield "matrices = self.execute_SplineCount(spline, count, start, end)"
             else:
                 yield "matrices = self.execute_SplineVertices(spline)"
-
+        elif self.mode == "FIBONACCI":
+            if self.fibonacciMode == "DISK":
+                yield "matrices = self.execute_Fibonacci_Disk(amount, radius)"
+            elif self.fibonacciMode == "SPHERE":
+                yield "matrices = self.execute_Fibonacci_Sphere(amount, radius)"
+        
         if "vectors" in required:
             yield "vectors = AN.nodes.matrix.c_utils.extractMatrixTranslations(matrices)"
 
@@ -384,6 +404,80 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
         spline.ensureNormals()
         count = len(spline.points)
         return spline.getDistributedMatrices(count, 0, 1, "RESOLUTION")
+
+    def execute_Fibonacci_Disk(self, Py_ssize_t _amount, float radius):
+        cdef Py_ssize_t i
+        cdef Vector3 position
+        cdef int amount = limitAmount(_amount)
+        cdef r, theta;
+        cdef Matrix4x4List matrices = Matrix4x4List(length = amount)
+
+        if self.planeAxis == "XY":
+            for i in range(amount):
+                r = sqrt(<float>i / <float>amount) * radius
+                theta = PI * (1.0 + 5.0**0.5) * <float>i
+                position.x = cos(theta) * r
+                position.y = sin(theta) * r
+                setTranslationMatrix(matrices.data + i, &position)
+            return matrices
+
+        if self.planeAxis == "YZ":
+            for i in range(amount):
+                r = sqrt(<float>i / <float>amount) * radius
+                theta = PI * (1.0 + 5.0**0.5) * <float>i
+                position.y = cos(theta) * r
+                position.z = sin(theta) * r
+                setTranslationMatrix(matrices.data + i, &position)
+            return matrices
+
+        for i in range(amount):
+            r = sqrt(<float>i / <float>amount) * radius
+            theta = PI * (1.0 + 5.0**0.5) * <float>i
+            position.x = cos(theta) * r
+            position.z = sin(theta) * r
+            setTranslationMatrix(matrices.data + i, &position)
+        return matrices
+
+    def execute_Fibonacci_Sphere(self, Py_ssize_t _amount, float radius):
+        cdef Py_ssize_t i
+        cdef Vector3 position
+        cdef int amount = limitAmount(_amount)
+        cdef float r, theta, y
+        cdef Matrix4x4List matrices = Matrix4x4List(length = amount)
+        cdef float offset = 2.0 / <float>(amount - 1) if amount > 1 else 0
+        cdef float phi = PI * (3.0 - sqrt(5.0))
+        
+        if self.planeAxis == "YZ":
+            for i in range(amount):
+                y = <float>i * offset - 1.0 + offset / 2.0
+                r = sqrt(1.0 - y * y) * radius
+                theta  = <float>i * phi
+                position.x = y * radius
+                position.y = cos(theta ) * r
+                position.z = sin(theta ) * r
+                setTranslationMatrix(matrices.data + i, &position)
+            return matrices
+            
+        if self.planeAxis == "XY":
+            for i in range(amount):
+                y = <float>i * offset - 1.0 + offset / 2.0
+                r = sqrt(1.0 - y * y) * radius
+                theta  = <float>i * phi
+                position.x = cos(theta ) * r
+                position.y = sin(theta ) * r
+                position.z = y * radius
+                setTranslationMatrix(matrices.data + i, &position)
+            return matrices
+            
+        for i in range(amount):
+            y = <float>i * offset - 1.0 + offset / 2.0
+            r = sqrt(1.0 - y * y) * radius
+            theta  = <float>i * phi
+            position.x = cos(theta ) * r
+            position.y = y * radius
+            position.z = sin(theta ) * r
+            setTranslationMatrix(matrices.data + i, &position)
+        return matrices
 
 cdef int limitAmount(n):
     return max(min(n, INT_MAX), 0)
