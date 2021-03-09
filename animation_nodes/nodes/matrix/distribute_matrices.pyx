@@ -473,7 +473,7 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
                 position.y = euler.y * r
                 position.z = euler.z * r
                 setTranslationMatrix(matrices.data + i, &position)
-                setRotationXYZMatrix(matrices.data + i, &euler)
+                #setRotationXYZMatrix(matrices.data + i, &euler)
             return matrices
 
         if self.planeAxis == "XY":
