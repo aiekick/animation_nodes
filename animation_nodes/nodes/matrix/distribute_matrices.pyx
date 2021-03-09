@@ -406,8 +406,8 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
         count = len(spline.points)
         return spline.getDistributedMatrices(count, 0, 1, "RESOLUTION")
 
-    def execute_Fibonacci_Disk(self, Py_ssize_t _amount, float radius):
-        cdef Py_ssize_t i
+    def execute_Fibonacci_Disk(self, _amount, float radius):
+        cdef int i
         cdef Vector3 position
         cdef int amount = limitAmount(_amount)
         cdef r, theta, iCos, iSin;
@@ -452,8 +452,8 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
             setMatrixCustomYRotation(matrices.data + i, iCos, iSin)
         return matrices
 
-    def execute_Fibonacci_Sphere(self, Py_ssize_t _amount, float radius):
-        cdef Py_ssize_t i
+    def execute_Fibonacci_Sphere(self, _amount, float radius):
+        cdef int i
         cdef Vector3 position
         cdef Euler3 euler
         cdef int amount = limitAmount(_amount)
@@ -461,20 +461,6 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
         cdef Matrix4x4List matrices = Matrix4x4List(length = amount)
         cdef float offset = 2.0 / <float>(amount - 1) if amount > 1 else 0
         cdef float phi = PI * (3.0 - sqrt(5.0))
-
-        if self.planeAxis == "YZ":
-            for i in range(amount):
-                euler.x = <float>i * offset - 1.0 + offset / 2.0
-                r = sqrt(1.0 - euler.y * euler.y) * radius
-                theta  = <float>i * phi
-                euler.y = cos(theta)
-                euler.z = sin(theta)
-                position.x = euler.x * radius
-                position.y = euler.y * r
-                position.z = euler.z * r
-                setTranslationMatrix(matrices.data + i, &position)
-                #setRotationXYZMatrix(matrices.data + i, &euler)
-            return matrices
 
         if self.planeAxis == "XY":
             for i in range(amount):
@@ -487,7 +473,21 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
                 position.y = iSin * r
                 position.z = y * radius
                 setTranslationMatrix(matrices.data + i, &position)
-                #setMatrixLookAt(matrices.data + i, iCos, iSin, y)
+                setMatrixCustomZRotation(matrices.data + i, iCos, iSin)
+            return matrices
+
+        if self.planeAxis == "YZ":
+            for i in range(amount):
+                y = <float>i * offset - 1.0 + offset / 2.0
+                r = sqrt(1.0 - y * y) * radius
+                theta  = <float>i * phi
+                iCos = cos(theta)
+                iSin = sin(theta)
+                position.x = y * radius
+                position.y = iCos * r
+                position.z = iSin * r
+                setTranslationMatrix(matrices.data + i, &position)
+                setMatrixCustomXRotation(matrices.data + i, iCos, iSin)
             return matrices
 
         for i in range(amount):
@@ -500,7 +500,7 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
             position.y = y * radius
             position.z = iSin * r
             setTranslationMatrix(matrices.data + i, &position)
-            #setMatrixLookAt(matrices.data + i, iCos, y, iSin)
+            setMatrixCustomYRotation(matrices.data + i, iCos, iSin)
         return matrices
 
 cdef int limitAmount(n):
@@ -517,42 +517,6 @@ cdef inline void setMatrixCustomYRotation(Matrix4* m, double iCos, double iSin):
 cdef inline void setMatrixCustomZRotation(Matrix4* m, double iCos, double iSin):
     m.a11 = m.a22 = iCos
     m.a12, m.a21 = -iSin, iSin
-
-cdef void setRotationXYZMatrix(Matrix4 *m, Euler3 *rotation):
-    cdef float sx, sy, sz
-    cdef float cx, cy, cz
-    cdef float cc, cs, sc, ss
-
-    sx, sy, sz = sin(rotation.x), sin(rotation.y), sin(rotation.z)
-    cx, cy, cz = cos(rotation.x), cos(rotation.y), cos(rotation.z)
-
-    cc = cx * cz
-    cs = cx * sz
-    sc = sx * cz
-    ss = sx * sz
-
-    m.a11 = cy * cz
-    m.a12 = sy * sc - cs
-    m.a13 = sy * cc + ss
-    m.a21 = cy * sz
-    m.a22 = sy * ss + cc
-    m.a23 = sy * cs - sc
-    m.a31 = -sy
-    m.a32 = cy * sx
-    m.a33 = cy * cx
-
-#cdef void setMatrixLookAt(Matrix4* m, double px, double py, double pz):
-#    cdef Vector3 vz = Vector3(px,py,pz)
-#    cdef Vector3 vy
-#    cdef Vector3 vx
-#    cdef Vector3 vu = Vector3(0,1,0)
-#    normalizeVec3_InPlace(&vz)
-#    crossVec3(&vx, &vu, &vz)
-#    normalizeVec3_InPlace(&vx)
-#    crossVec3(&vy, &vz, &vx)
-#    m.a11, m.a12, m.a13 = vx.x, vy.x, vz.x
-#    m.a21, m.a22, m.a23 = vx.y, vy.y, vz.y
-#    m.a31, m.a32, m.a33 = vx.z, vy.z, vz.z
 
 cdef inline void rotateStep(float *iCos, float *iSin, float stepCos, float stepSin):
     cdef float newCos = stepCos * iCos[0] - stepSin * iSin[0]
