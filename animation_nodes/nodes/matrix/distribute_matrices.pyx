@@ -1,7 +1,7 @@
 import bpy
 from bpy.props import *
 from math import pi as _pi
-from libc.math cimport sin, cos, sqrt
+from libc.math cimport sin, cos, sqrt, floor
 from ... utils.limits cimport INT_MAX
 from ... events import propertyChanged
 from ... base_types import AnimationNode
@@ -55,6 +55,7 @@ searchItems = {
 }
 
 directionAxisItems = [(axis, axis, "") for axis in ("X", "Y", "Z")]
+
 planeAxisItems = [(axis, axis, "") for axis in ("XY", "YZ", "ZX")]
 
 class DistributeMatricesNode(bpy.types.Node, AnimationNode):
@@ -152,6 +153,9 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
         elif self.mode == "FIBONACCI":
             self.newInput("Integer", "Amount", "amount", value = 100, minValue = 0)
             self.newInput("Float", "Radius", "radius", value = 10, minValue = 0)
+            self.newInput("Float", "Ratio", "ratio", value = 1)
+            if self.fibonacciMode == "SPHERE":
+                self.newInput("Float", "Offset", "offset", value = 0)
             
         self.newOutput("Matrix List", "Matrices", "matrices")
         self.newOutput("Vector List", "Vectors", "vectors")
@@ -218,9 +222,9 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
                 yield "matrices = self.execute_SplineVertices(spline)"
         elif self.mode == "FIBONACCI":
             if self.fibonacciMode == "DISK":
-                yield "matrices = self.execute_Fibonacci_Disk(amount, radius)"
+                yield "matrices = self.execute_Fibonacci_Disk(amount, radius, ratio)"
             elif self.fibonacciMode == "SPHERE":
-                yield "matrices = self.execute_Fibonacci_Sphere(amount, radius)"
+                yield "matrices = self.execute_Fibonacci_Sphere(amount, radius, ratio, offset)"
         
         if "vectors" in required:
             yield "vectors = AN.nodes.matrix.c_utils.extractMatrixTranslations(matrices)"
@@ -406,13 +410,13 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
         count = len(spline.points)
         return spline.getDistributedMatrices(count, 0, 1, "RESOLUTION")
 
-    def execute_Fibonacci_Disk(self, _amount, float radius):
+    def execute_Fibonacci_Disk(self, _amount, float radius, float ratio):
         cdef int i
         cdef Vector3 position
         cdef int amount = limitAmount(_amount)
         cdef r, theta, iCos, iSin;
         cdef Matrix4x4List matrices = Matrix4x4List(length = amount)
-        cdef float phi = PI * (3.0 - sqrt(5.0))
+        cdef float phi = PI * (3.0 - sqrt(5.0)) * ratio
 
         if self.planeAxis == "XY":
             for i in range(amount):
@@ -452,19 +456,20 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
             setMatrixCustomYRotation(matrices.data + i, iCos, iSin)
         return matrices
 
-    def execute_Fibonacci_Sphere(self, _amount, float radius):
+    def execute_Fibonacci_Sphere(self, _amount, float radius, float ratio, float offset):
         cdef int i
         cdef Vector3 position
         cdef Euler3 euler
         cdef int amount = limitAmount(_amount)
         cdef float r, theta
         cdef Matrix4x4List matrices = Matrix4x4List(length = amount)
-        cdef float offset = 2.0 / <float>(amount - 1) if amount > 1 else 0
-        cdef float phi = PI * (3.0 - sqrt(5.0))
+        cdef float div = 1.0 / <float>(amount - 1) if amount > 1 else 0
+        cdef float phi = PI * (3.0 - sqrt(5.0)) * ratio
 
         if self.planeAxis == "XY":
             for i in range(amount):
-                y = <float>i * offset - 1.0 + offset / 2.0
+                y = <float>i * div + offset
+                y = (y - floor(y)) * 2.0 - 1.0
                 r = sqrt(1.0 - y * y) * radius
                 theta  = <float>i * phi
                 iCos = cos(theta)
@@ -478,7 +483,8 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
 
         if self.planeAxis == "YZ":
             for i in range(amount):
-                y = <float>i * offset - 1.0 + offset / 2.0
+                y = <float>i * div + offset
+                y = (y - floor(y)) * 2.0 - 1.0
                 r = sqrt(1.0 - y * y) * radius
                 theta  = <float>i * phi
                 iCos = cos(theta)
@@ -491,7 +497,8 @@ class DistributeMatricesNode(bpy.types.Node, AnimationNode):
             return matrices
 
         for i in range(amount):
-            y = <float>i * offset - 1.0 + offset / 2.0
+            y = <float>i * div + offset
+            y = (y - floor(y)) * 2.0 - 1.0
             r = sqrt(1.0 - y * y) * radius
             theta  = <float>i * phi
             iCos = cos(theta)
